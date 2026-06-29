@@ -24,16 +24,18 @@ ai-jd-resume-matcher/
 
 
 ## 本地部署步骤
-1. 创建并激活虚拟环境
+### 1. 创建并激活虚拟环境
 ```cmd
 python -m venv venv
 venv\Scripts\activate
-2.安装项目依赖
+```
+### 2.安装项目依赖
+```cmd
 pip install -r requirements.txt
-3.配置大模型密钥
+```
+### 3.配置大模型密钥
 在`.env`文件中填入你的 LLM API Key、接口地址、模型名称
-4. 启动项目
-
+### 4. 启动项目
 ```cmd
 python main.py
 ```
@@ -68,6 +70,6 @@ python main.py
 
 ## 迭代规划
 
-V1 现有版本：JD 解析、单简历匹配、批量 AI 评测导出报表
-V2 体验升级：支持 PDF/TXT 简历上传、会话历史记录、完善异常交互
-V3 AI 创新拓展：Agent 自动改写简历、简历敏感信息脱敏、多模型横向对比评测
+V1 现有版本：JD 解析、单简历匹配、批量 AI 评测导出报表;
+V2 体验升级：支持 PDF/TXT 简历上传、会话历史记录、完善异常交互;
+V3 AI 创新拓展：Agent 自动改写简历、简历敏感信息脱敏、多模型横向对比评测.
