@@ -1,0 +1,17 @@
+# 虚拟环境
+venv/
+__pycache__/
+*.pyc
+*.log
+
+# 密钥配置
+.env
+
+# 评测输出文件
+output/
+test_result.csv
+
+# 系统文件
+.DS_Store
+.vscode/
+.idea/
