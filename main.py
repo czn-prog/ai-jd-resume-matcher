@@ -1,111 +1,160 @@
-import gradio as gr
-import pandas as pd
 import os
+import time
+import json
+import pandas as pd
+import gradio as gr
 from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 
-# 加载密钥
+# 加载.env密钥
 load_dotenv()
+API_KEY = os.getenv("LLM_API_KEY")
+BASE_URL = os.getenv("LLM_BASE_URL")
+MODEL_NAME = os.getenv("LLM_MODEL")
+
+# 自动创建输出文件夹
+if not os.path.exists("output"):
+    os.makedirs("output")
+
+# 初始化智谱GLM大模型
 llm = ChatOpenAI(
-    api_key=os.getenv("LLM_API_KEY"),
-    base_url=os.getenv("LLM_BASE_URL"),
-    model=os.getenv("LLM_MODEL"),
+    model=MODEL_NAME,
+    api_key=API_KEY,
+    base_url=BASE_URL,
     temperature=0.3
 )
 
-# Prompt模板1：JD解析
-jd_prompt = PromptTemplate(
-    input_variables=["jd_text"],
-    template="""
-你是资深AI招聘产品，分析下面岗位JD，输出结构化内容：
-1. 核心硬性要求（学历、工作年限、专业、技能）
-2. 岗位核心业务能力
-3. AI相关能力要求
-4. 加分项
-JD内容：{jd_text}
-只输出清晰结构化文本，不要多余话术。
-"""
-)
+# 匹配打分Prompt模板
+match_prompt = ChatPromptTemplate.from_template("""
+你是资深招聘HR，根据岗位JD与简历进行匹配打分，满分100分。
+打分维度：
+1. 核心技能匹配（40分）
+2. 工作年限&行业经验（30分）
+3. 学历专业匹配（20分）
+4. 项目综合能力（10分）
 
-# Prompt模板2：简历匹配打分
-match_prompt = PromptTemplate(
-    input_variables=["jd_info", "resume_text"],
-    template="""
-基于JD要求，对简历进行匹配评估：
-JD信息：{jd_info}
+岗位JD：{jd_text}
 简历内容：{resume_text}
-输出内容：
-1. 综合匹配分数（0-100）
-2. 简历优势点
-3. 缺失能力/关键词
-4. 简历优化建议（量化成果、补充AI相关经历）
-5. 模拟3道针对性面试提问
+
+仅输出标准JSON，无多余文字，格式如下：
+{{
+    "score": 数字分数,
+    "analysis": "分段说明匹配优势与短板"
+}}
+""")
+
+# 单份简历AI打分函数
+def single_resume_match(jd_text, resume_text):
+    if not jd_text.strip() or not resume_text.strip():
+        return "请输入完整JD和简历内容", ""
+    try:
+        resp = llm.invoke(match_prompt.format(jd_text=jd_text, resume_text=resume_text))
+        data = json.loads(resp.content)
+        score = data["score"]
+        analysis = f"匹配总分：{score}分\n{data['analysis']}"
+        return analysis, f"{score} 分"
+    except Exception as e:
+        return f"AI调用失败：{str(e)}", "0 分"
+
+# 批量CSV评测核心函数
+def batch_evaluate(csv_file, jd_text):
+    if not csv_file:
+        return "错误：请上传简历CSV文件", None, None
+    if not jd_text.strip():
+        return "错误：请填写目标岗位JD", None, None
+
+    # 读取CSV，兼容utf-8/gbk
+    try:
+        df = pd.read_csv(csv_file, encoding="utf-8")
+    except:
+        df = pd.read_csv(csv_file, encoding="gbk")
+
+    # 校验必填表头
+    need_cols = ["id", "name", "work_year", "education", "major", "skills", "work_experience"]
+    lack = [c for c in need_cols if c not in df.columns]
+    if lack:
+        return f"CSV缺失字段：{','.join(lack)}", None, None
+
+    # 空值填充
+    df = df.fillna("无")
+    total = len(df)
+    result_rows = []
+
+    for idx, row in df.iterrows():
+        try:
+            resume_full = f"""
+姓名：{row['name']}
+工作年限：{row['work_year']}
+学历：{row['education']}
+专业：{row['major']}
+技能：{row['skills']}
+工作经历：{row['work_experience']}
+            """
+            resp = llm.invoke(match_prompt.format(jd_text=jd_text, resume_text=resume_full))
+            res = json.loads(resp.content)
+            result_rows.append({
+                "id": row["id"],
+                "name": row["name"],
+                "match_score": res["score"],
+                "match_detail": res["analysis"],
+                "status": "成功"
+            })
+            print(f"进度 {idx+1}/{total} {row['name']} 完成")
+            time.sleep(0.6)
+        except Exception as e:
+            result_rows.append({
+                "id": row["id"],
+                "name": row["name"],
+                "match_score": 0,
+                "match_detail": f"处理异常：{str(e)}",
+                "status": "失败"
+            })
+            continue
+
+    # 导出结果CSV
+    res_df = pd.DataFrame(result_rows)
+    save_path = "output/批量评测结果.csv"
+    res_df.to_csv(save_path, index=False, encoding="utf-8-sig")
+
+    # 统计汇总
+    succ = len(res_df[res_df["status"] == "成功"])
+    fail = len(res_df[res_df["status"] == "失败"])
+    avg_score = round(res_df[res_df[res_df["match_score"] > 0]["match_score"].mean(), 2]) if succ > 0 else 0
+    summary = f"""
+# 批量评测完成
+- 总简历数量：{total} 份
+- 成功处理：{succ} 份
+- 失败条目：{fail} 份
+- 平均匹配分数：{avg_score} 分
+结果文件已保存至 output/批量评测结果.csv
 """
-)
+    return summary, res_df, save_path
 
-# Prompt模板3：批量评测打分
-eval_prompt = PromptTemplate(
-    input_variables=["jd_info", "resume_text"],
-    template="""
-仅输出JSON格式，字段：match_score(0-100), missing_count(缺失能力数量), ai_match(0-10 AI匹配度)
-JD：{jd_info}
-简历：{resume_text}
-"""
-)
+# 搭建Gradio页面（修复Tabs拆包报错）
+with gr.Blocks(title="AI简历-JD智能匹配系统") as demo:
+    gr.Markdown("# AI简历JD智能匹配工具")
+    with gr.Tabs():
+        # 标签1：单条匹配
+        with gr.Tab("单份简历匹配"):
+            jd_input = gr.Textbox(label="岗位JD内容", lines=8, placeholder="粘贴招聘岗位要求")
+            resume_input = gr.Textbox(label="简历文本", lines=10, placeholder="粘贴简历全文")
+            run_btn = gr.Button("一键匹配打分", variant="primary")
+            score_out = gr.Textbox(label="匹配得分")
+            analysis_out = gr.Textbox(label="匹配分析详情", lines=12)
+            run_btn.click(single_resume_match, inputs=[jd_input, resume_input], outputs=[analysis_out, score_out])
 
-# 业务函数
-def parse_jd(jd_text):
-    chain = jd_prompt | llm
-    res = chain.invoke({"jd_text": jd_text})
-    return res.content
+        # 标签2：批量评测模块
+        with gr.Tab("后台批量评测模块"):
+            gr.Markdown("## CSV批量简历评测")
+            batch_jd = gr.Textbox(label="统一岗位JD", lines=6)
+            upload_csv = gr.File(label="上传简历CSV文件", file_types=[".csv"])
+            start_batch = gr.Button("启动批量评测", variant="primary")
+            summary_md = gr.Markdown(label="评测汇总信息")
+            result_table = gr.DataFrame(label="匹配结果明细")
+            file_download = gr.File(label="下载评测报表")
+            start_batch.click(batch_evaluate, inputs=[upload_csv, batch_jd], outputs=[summary_md, result_table, file_download])
 
-def match_resume(jd_info, resume_text):
-    if not jd_info or not resume_text:
-        return "请先解析JD，再输入简历内容"
-    chain = match_prompt | llm
-    res = chain.invoke({"jd_info": jd_info, "resume_text": resume_text})
-    return res.content
-
-def batch_eval(jd_info, csv_file):
-    if not jd_info:
-        return "请先解析JD", None
-    df = pd.read_csv(csv_file)
-    result_list = []
-    for row in df.to_dict("records"):
-        resume = row["resume"]
-        chain = eval_prompt | llm
-        eval_res = chain.invoke({"jd_info": jd_info, "resume_text": resume})
-        result_list.append({"resume": resume, "eval": eval_res.content})
-    out_df = pd.DataFrame(result_list)
-    out_path = "output/test_result.csv"
-    os.makedirs("output", exist_ok=True)
-    out_df.to_csv(out_path, index=False, encoding="utf-8-sig")
-    return "批量评测完成，文件已导出", out_path
-
-# 页面搭建
-with gr.Blocks(title="AI简历JD匹配助手") as demo:
-    gr.Markdown("# AI简历-JD智能匹配工具（AI产品求职Demo）")
-    gr.Markdown("## 普通求职者端：JD解析 + 简历匹配优化")
-    with gr.Row():
-        with gr.Column(scale=1):
-            jd_input = gr.Textbox(label="粘贴岗位JD", lines=8)
-            parse_btn = gr.Button("1.解析JD需求")
-            jd_out = gr.Textbox(label="JD结构化拆解结果", lines=10)
-            parse_btn.click(parse_jd, inputs=[jd_input], outputs=[jd_out])
-        with gr.Column(scale=1):
-            resume_input = gr.Textbox(label="粘贴你的简历全文", lines=8)
-            match_btn = gr.Button("2.简历匹配打分&优化")
-            match_out = gr.Textbox(label="匹配报告+面试题", lines=12)
-            match_btn.click(match_resume, inputs=[jd_out, resume_input], outputs=[match_out])
-
-    gr.Markdown("## 产品后台评测模块（AI产品核心能力）")
-    with gr.Row():
-        csv_upload = gr.File(label="批量简历CSV文件", file_types=[".csv"])
-        eval_btn = gr.Button("批量AI评测，输出报表")
-    eval_msg = gr.Textbox(label="评测状态")
-    eval_file = gr.File(label="下载评测结果")
-    eval_btn.click(batch_eval, inputs=[jd_out, csv_upload], outputs=[eval_msg, eval_file])
-
+# 启动服务
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)
