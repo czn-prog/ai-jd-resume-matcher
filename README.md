@@ -8,7 +8,7 @@ Python + Gradio 前端交互 + LangChain + LLM API
 无需GPU，本地一键运行。
 
 ## 目录结构
-'''
+'''cmd
 ai-jd-resume-matcher/
 ├── main.py               # 程序主入口，页面与 AI 逻辑
 ├── requirements.txt      # 项目依赖清单
