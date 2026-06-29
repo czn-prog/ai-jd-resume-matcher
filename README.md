@@ -8,6 +8,7 @@ Python + Gradio 前端交互 + LangChain + LLM API
 无需GPU，本地一键运行。
 
 ## 目录结构
+'''
 ai-jd-resume-matcher/
 ├── main.py               # 程序主入口，页面与 AI 逻辑
 ├── requirements.txt      # 项目依赖清单
@@ -16,9 +17,10 @@ ai-jd-resume-matcher/
 ├── assets/               # 界面截图、演示图片
 ├── output/               # 批量评测导出报表
 └── docs/
-├── PRD.md            # 完整产品需求文档
-├── AI 评测方案.md     # AI 模型评测指标与实验流程
-└── 产品迭代规划.md   # 基于 AI 技术趋势的迭代方案
+    ├── PRD.md            # 完整产品需求文档
+    ├── AI评测方案.md     # AI 模型评测指标与实验流程
+    └── 产品迭代规划.md   # 基于 AI 技术趋势的迭代方案
+'''
 
 
 ## 本地部署步骤
